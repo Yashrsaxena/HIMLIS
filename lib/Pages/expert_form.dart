@@ -1,6 +1,14 @@
+import 'dart:io';
+import 'package:async/async.dart';
 import 'package:flutter/material.dart';
+import 'package:himlis/Pages/second_loading.dart';
+import 'package:himlis/Pages/submission.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
-import 'package:http/http.dart';
+import 'package:http/http.dart' as http;
+import 'package:location/location.dart';
 // import 'package:geolocator/geolocator.dart';
 
 class ExpertFormPage extends StatefulWidget {
@@ -13,11 +21,29 @@ class ExpertFormPage extends StatefulWidget {
 
 class _ExpertFormPageState extends State<ExpertFormPage> {
   int p=0;
+  bool _pending = false;
+  var location = Location();
+  LocationData? _currentLocation;
+  String currentLocation ="Location";
+  String _responseBody = '<empty>';
+  String _error = '<none>';
   TextEditingController _dateController = TextEditingController();
   TextEditingController _timeController = TextEditingController();
+  late TextEditingController _infrastructure = TextEditingController();
+  late TextEditingController _population = TextEditingController();
+  late TextEditingController description = TextEditingController();
+  late TextEditingController estimatedTime = TextEditingController();
+  TextEditingController bypass = TextEditingController();
+  late TextEditingController photo = TextEditingController();
+  late TextEditingController video = TextEditingController();
   DateTime selectedDate = DateTime.now();
   TimeOfDay selectedTime = TimeOfDay.now();
+  ImagePicker imagePicker = ImagePicker();
   String? _setTime, _setDate;
+
+  File? _image;
+  List<XFile>? _images;
+  bool isMultiple = false;
 
   String? _hour, _minute, _time;
 
@@ -26,21 +52,62 @@ class _ExpertFormPageState extends State<ExpertFormPage> {
 
   String? dateTime;
 
-  // @override
-  // void initState() {
-  //   super.initState();
-  //   getCurrentLocation();
-  // }
+//Image Access
+Future getImage(ImageSource source, {isCamera = false, isVideo = false}) async {
+    final dynamic image;
+    final XFile i;
+    final List<XFile>? images;
+    if(isCamera)
+      {image = await imagePicker.pickImage(source: source);
+      final imagePermanent = await saveImagePermanently(image.path);
+      setState(() {
+        _image = imagePermanent;
+      // _image = File(image!.path);
+    });
+    }
+    else if(isVideo)
+      {image = await imagePicker.pickVideo(source: ImageSource.camera);}
+    else{
+      images = await imagePicker.pickMultiImage();
+      setState(() {
+      _images = images;
+    });
+    }
+  }
 
-  // getCurrentLocation() async {
-  //   final geoposition = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  //Image Saving Permanently
+  Future<File> saveImagePermanently(String imagePath) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final name = basename(imagePath);
+    final image = File('${directory.path}/$name');
 
-  //   setState(() {
-  //     latitude = geoposition.latitude.toString();
-  //     print(latitude);
-  //     longitude = geoposition.longitude.toString();
-  //   });
-  // }
+    return File(imagePath).copy(image.path);
+  }
+
+//Location Access
+Future<void> _getLocation()async{
+    var _serviceEnabled = await location.serviceEnabled();
+    if(!_serviceEnabled){
+      _serviceEnabled = await location.requestService();
+      if(!_serviceEnabled)
+      {
+        return;
+      }
+    }
+    var _permissionGranted = await location.hasPermission();
+    if(_permissionGranted == PermissionStatus.denied){
+      _permissionGranted = await location.requestPermission();
+      if(_permissionGranted != PermissionStatus.granted){
+        return;
+      }
+    }
+    _currentLocation = await location.getLocation();
+    setState(() {
+      currentLocation = _currentLocation!.latitude.toString() + " " + _currentLocation!.longitude.toString();
+      print(_currentLocation!.accuracy.toString());
+    });
+  }
+
   Future<Null> _selectDate(BuildContext context) async {
   DateTime? picked = await showDatePicker(
       context: context,
@@ -65,19 +132,14 @@ Future<Null> _selectTime(BuildContext context) async {
         selectedTime = picked;
         _hour = selectedTime.hour.toString();
         _minute = selectedTime.minute.toString();
-        //_time = _hour + ' : ' + _minute!;
-        //_timeController.text = _time!;
-        // _timeController.text = formatDate(
-        //     DateTime(2019, 08, 1, selectedTime.hour, selectedTime.minute),
-        //     [hh, ':', nn, " ", am]).toString();
       });
   }
-  String dropCategory = "Rotational";
-  String dropVolume = "Small: Less than 10 metric cube";
-  String dropTrigger = "Rainfall";
-  String dropEventType = "New Event";
-  String dropEventStatus = "Active";
-  String dropRoad = "Free Transit";
+  String? dropCategory;
+  String? dropVolume;
+  String? dropTrigger;
+  String? dropEventType;
+  String? dropEventStatus;
+  String? dropRoad;
   @override
   Widget build(BuildContext context) {
     if(p==0){return SafeArea(
@@ -102,10 +164,10 @@ Future<Null> _selectTime(BuildContext context) async {
                 const Text(
                   'Temporal and Spatial Data', style: TextStyle(fontSize: 25),
                 ),
-              Text('Location'),
+              const Text('Location'),
               GestureDetector(
                     onTap: (){
-                      // getCurrentLocation();
+                      _getLocation();
                     },
                     child: Container(
                       margin: const EdgeInsets.all(10),
@@ -117,10 +179,10 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text(latitude==""?"Current Location":[latitude, " ", longitude].join(),style: TextStyle(fontSize: 20),),),
+                      child: Center(child: Text(currentLocation,style: const TextStyle(fontSize: 20),),),
                     ),
                   ),
-              Text("Date and Time"),
+              const Text("Date and Time"),
               Row(
                 children: <Widget>[
                   Expanded(child: GestureDetector(
@@ -137,7 +199,7 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text([selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), style: TextStyle(fontSize: 20),),),
+                      child: Center(child: Text([selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), style: const TextStyle(fontSize: 20),),),
                     ),
                   ),),
                   Expanded(child: GestureDetector(
@@ -154,37 +216,39 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text([selectedTime.hour.toString(),':',selectedTime.minute].join(), style: TextStyle(fontSize: 20),),)
+                      child: Center(child: Text([selectedTime.hour.toString(),':',selectedTime.minute.toString().length==1?'0'+selectedTime.minute.toString():selectedTime.minute.toString()].join(), style: const TextStyle(fontSize: 20),),)
                     )
                   ),)
                 ],
               ),
-              textForm('Depth'),
               const Text('Estimated Landslide Volume'),
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Small: Less than 10 metric cube",
-"Medium :10-1000 metric cube",
-"Large: 1000-100,000 metric cube",
-"Very large: 100,000-1,000,000 metric cube",
-"Catastrophic: Greater than 1,000,000 metric cube"
-].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropVolume = newValue!;
-                  });
-                },
-                value: dropVolume,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Estimated Landslide Volume"),
+                  items: ["Small: Less than 10 metric cube",
+                "Medium :10-1000 metric cube",
+                "Large: 1000-100,000 metric cube",
+                "Very large: 100,000-1,000,000 metric cube",
+                "Catastrophic: Greater than 1,000,000 metric cube"
+                ].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropVolume = newValue!;
+                    });
+                  },
+                  value: dropVolume,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -254,7 +318,8 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
+                child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                  hint: const Text("Triggering Factor"),
                 items: ["Rainfall", "Seismic Activity", "Others"].map<DropdownMenuItem<String>>((String value){
                   return DropdownMenuItem<String>(
                     value: value,
@@ -270,6 +335,7 @@ Future<Null> _selectTime(BuildContext context) async {
                 isExpanded: true,
                 borderRadius: BorderRadius.circular(20),
               ),
+              ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -278,13 +344,14 @@ Future<Null> _selectTime(BuildContext context) async {
       borderRadius: BorderRadius.circular(50)),
       
               ),
-              Visibility(child: textForm('Describe the Triggering factor'),
+              Visibility(child: textForm('Describe the Triggering factor', description),
               visible:dropTrigger=="Others"),
               const Text('Type of Event'),
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
+                child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                  hint: const Text("Type of Event"),
                 items: ["New Event", "Reactivated Event"].map<DropdownMenuItem<String>>((String value){
                   return DropdownMenuItem<String>(
                     value: value,
@@ -299,7 +366,7 @@ Future<Null> _selectTime(BuildContext context) async {
                 value: dropEventType,
                 isExpanded: true,
                 borderRadius: BorderRadius.circular(20),
-              ),
+              ),),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -311,7 +378,8 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
+                child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                  hint: const Text("Status of Event"),
                 items: ["Active", "Reactivatable", "Naturally Stabilized", "Artificially Stabilized"].map<DropdownMenuItem<String>>((String value){
                   return DropdownMenuItem<String>(
                     value: value,
@@ -327,6 +395,7 @@ Future<Null> _selectTime(BuildContext context) async {
                 isExpanded: true,
                 borderRadius: BorderRadius.circular(20),
               ),
+              ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -338,7 +407,8 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
+                child: DropdownButtonHideUnderline(child: DropdownButton<String>(
+                  hint: const Text("Category"),
                 items: ["Rotational","Transitional","Block Slide","Debris Flow","Debris Avalanche", "Rock Fall", "Topple", "Earth Flow", "Creep", "Lateral Spread"].map<DropdownMenuItem<String>>((String value){
                   return DropdownMenuItem<String>(
                     value: value,
@@ -353,7 +423,7 @@ Future<Null> _selectTime(BuildContext context) async {
                 value: dropCategory,
                 isExpanded: true,
                 borderRadius: BorderRadius.circular(20),
-              ),
+              ),),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -423,27 +493,30 @@ Future<Null> _selectTime(BuildContext context) async {
                 const Text(
                   'Elements of Risk', style: TextStyle(fontSize: 25),
                 ),
-              textForm('Insfrastructure Effected'),
-              const Text('Road Insfrastructure Effected'),
+              textForm('Infrastructure Effected', _infrastructure),
+              const Text('Road Infrastructure Effected'),
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Free Transit", "Transit with Precaution", "Dangerous transit", "Road Partially Closed", "Road Closed"].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropRoad = newValue!;
-                  });
-                },
-                value: dropRoad,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Road Infrastructure Effected"),
+                  items: ["Free Transit", "Transit with Precaution", "Dangerous transit", "Road Partially Closed", "Road Closed"].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropRoad = newValue!;
+                    });
+                  },
+                  value: dropRoad,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -451,11 +524,11 @@ Future<Null> _selectTime(BuildContext context) async {
       ),
       borderRadius: BorderRadius.circular(50)),
               ),
-              Visibility(child: textForm('Estimated Clear Time'),
+              Visibility(child: textForm('Estimated Clear Time', estimatedTime),
               visible: dropRoad=="Road Partially Closed",),
-              Visibility(child: textForm('By Pass Route'),
+              Visibility(child: textForm('By Pass Route', bypass),
               visible: dropRoad=="Road Closed",),
-              textForm('Population Effected'),
+              textForm('Population Effected', _population),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children:<Widget>[ElevatedButton(onPressed: (){
@@ -516,10 +589,30 @@ Future<Null> _selectTime(BuildContext context) async {
               margin: const EdgeInsets.all(10),
               child: SingleChildScrollView(child: Form(child: Column(children: <Widget>[
                 const Text(
-                  'Photos and Videos', style: TextStyle(fontSize: 25),
+                  'Photos', style: TextStyle(fontSize: 25),
                 ),
-              textForm('Take Photos and (or) Videos'),
-              textForm('Upload Photos and (or) Videos'),
+              Column(children: [
+                _image!=null?Image.file(_image!):const Text("No Image Selected"),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                    ElevatedButton(onPressed: (){
+                  getImage(ImageSource.camera, isCamera: true);
+                              },
+                              style: ElevatedButton.styleFrom(primary: Colors.black), 
+                              child: const Icon(Icons.camera)),
+                              ElevatedButton(onPressed: (){
+                                getImage(ImageSource.gallery, isCamera: true);
+                                setState(() {
+                                  isMultiple = true;
+                                });
+                              }, 
+                              style: ElevatedButton.styleFrom(primary: Colors.black),
+                              child: const Icon(Icons.collections)),
+                  ],),
+                ),]),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children:<Widget>[ElevatedButton(onPressed: (){
@@ -532,7 +625,13 @@ Future<Null> _selectTime(BuildContext context) async {
               ),
               ),
               const SizedBox(width: 10,),
-              ElevatedButton(onPressed: (){},
+              ElevatedButton(onPressed: _pending?null:(){
+                 _httpPost(_currentLocation!.latitude.toString(), _currentLocation!.longitude.toString(), dropVolume, [selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), [selectedTime.hour.toString(),':',selectedTime.minute].join(), dropTrigger, dropEventStatus, dropEventType, description.text, dropCategory, _infrastructure.text, dropRoad, estimatedTime.text, _population.text, bypass.text, File(_image!.path));
+                Navigator.push(
+                            context,
+                            PageRouteBuilder(
+                                pageBuilder: (context, a, b) => const SecondLoading()));
+              },
               style: ElevatedButton.styleFrom(primary: Colors.black),
               child: const Text('Send', style: TextStyle(color: Colors.white),
               ),
@@ -556,32 +655,7 @@ Future<Null> _selectTime(BuildContext context) async {
     );
   }
   }
-  // Widget dropMenu(List <String>option){
-  //   String dropCategory = 'Select';
-  //   return DropdownButton<String>(
-  //     value: dropCategory,
-  //     icon: const Icon(Icons.arrow_circle_down),
-  //     iconSize: 24,
-  //     elevation: 16,
-  //     style: const TextStyle(color: Colors.black),
-  //     underline: Container(
-  //       height: 2,
-  //       color: Colors.black,
-  //     ),
-  //     onChanged: (String? newValue) {
-  //       setState(() {
-  //         dropCategory = newValue!;
-  //       });
-  //     },
-  //     items: option.map<DropdownMenuItem<String>>((String value) {
-  //       return DropdownMenuItem<String>(
-  //         value: value,
-  //         child: Text(value),
-  //       );
-  //     }).toList(),
-  //   );
-  // }
-  Widget textForm(String _hint){
+  Widget textForm(String _hint, TextEditingController _controller){
     return Column(
       children: <Widget>[
         Text(_hint),
@@ -589,6 +663,7 @@ Future<Null> _selectTime(BuildContext context) async {
       margin: const EdgeInsets.all(10),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: TextFormField(
+        controller: _controller,
                 decoration: InputDecoration(
                   border: InputBorder.none,
                   hintText: _hint,
@@ -602,5 +677,55 @@ Future<Null> _selectTime(BuildContext context) async {
       borderRadius: BorderRadius.circular(50)),
     )]
     );
+}
+
+Future _httpPost(String latitude, String longitude, String? volume, String _date, String _time, String? triggerFactor, String? statusOfEvent, String? typeOfEvent, String description, String? category, String infrastructureEffected, String? roadInfrastructureEffected, String estimatedClearTime, String populationEffected, String byPassRoute, File image) async {
+  setState(()=>_pending = true);
+  try{
+    var stream = http.ByteStream(DelegatingStream.typed(image.openRead()));
+    var length = await image.length();
+    var uri = Uri.parse("https://lehrish.herokuapp.com/experts");
+    var request = http.MultipartRequest("POST", uri);
+    var multipartFile = http.MultipartFile('file', stream, length, filename: basename(image.path));
+    request.files.add(multipartFile);
+      request.fields['latitude']=latitude;
+      request.fields['longitude']=longitude;
+      request.fields['Date']=_date;
+      request.fields['Time']=_time;
+      request.fields['volume']=volume==null?"volume not selected":volume;
+      request.fields['triggering_factor']=triggerFactor==null?"triggerFactor not selected":triggerFactor;
+      request.fields['status_of_event']=statusOfEvent==null?"statusOfEvent not selected":statusOfEvent;
+      request.fields['type_of_event']=typeOfEvent==null?"typeOfEvent not selected":typeOfEvent;
+      request.fields['description']=description;
+      request.fields['category']=category==null?"category not selected":category;
+      request.fields['infrastructure_effected']=infrastructureEffected;
+      request.fields['road_infrastructure_effected']=roadInfrastructureEffected==null?"roadInfrastructureEffected not selected":roadInfrastructureEffected;
+      request.fields['estimated_clear_time']=estimatedClearTime;
+      request.fields['population_effected']=populationEffected;
+      request.fields['by_pass_route']=byPassRoute;
+      var response = await request.send();
+      
+    if(response.statusCode == 200){
+      setState(() {
+        // _responseBody = response.body;
+        print('Status OK');
+      });
+    }
+    else{
+      setState(() {
+        _error = 'Failed';
+        print('Status not OK ${response.statusCode}');
+      });
+    }
+  }
+  catch(e){
+    print('failed ${e}');
+    setState(() {
+      _error = 'Failed';
+    });
+  }
+  setState(() {
+    _pending = false;
+  });
 }
 }

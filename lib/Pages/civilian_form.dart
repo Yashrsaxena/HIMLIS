@@ -1,42 +1,88 @@
+import 'dart:convert';
+import 'dart:io';
+// import 'package:himlis/Components/dropdown_menu.dart';
+import 'package:location/location.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:async/async.dart';
+import 'package:path/path.dart';
 import 'package:flutter/material.dart';
-// import 'package:geolocator/geolocator.dart';
+import 'package:himlis/Pages/second_loading.dart';
+import 'package:http/http.dart' as http;
 
 class CivilianFormPage extends StatefulWidget {
   bool status;
-  CivilianFormPage({ Key? key , required this.status}) : super(key: key);
+  CivilianFormPage({ Key? key, required this.status}) : super(key: key);
 
   @override
   _CivilianFormPageState createState() => _CivilianFormPageState();
 }
 
 class _CivilianFormPageState extends State<CivilianFormPage> {
+  bool _pending = false;
+  var location = Location();
+  LocationData? _currentLocation;
+  String currentLocation ="Location";
+  String _responseBody = '<empty>';
+  String _error = '<none>';
   TextEditingController _dateController = TextEditingController();
   TextEditingController _timeController = TextEditingController();
   DateTime selectedDate = DateTime.now();
   TimeOfDay selectedTime = TimeOfDay.now();
   String? _setTime, _setDate;
-
-  String latitude = "";
-  String longitude = "";
+  File? _image;
+  List<XFile>? _images;
+  double? latitude;
+  double? longitude;
+  bool isMultiple = false;
 
   String? _hour, _minute, _time;
 
+  ImagePicker imagePicker = ImagePicker();
   String? dateTime;
-  // @override
-  // void initState() {
-  //   super.initState();
-  //   getCurrentLocation();
-  // }
 
-  // getCurrentLocation() async {
-  //   final geoposition = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  Future getImage(ImageSource source, {isCamera = false, isVideo = false}) async {
+    final dynamic image;
+    final XFile i;
+    final List<XFile>? images;
+    if(isCamera)
+      {image = await imagePicker.pickImage(source: source);
+      setState(() {
+      _image = File(image!.path);
+    });
+    }
+    else if(isVideo)
+      {image = await imagePicker.pickVideo(source: ImageSource.camera);}
+    else{
+      images = await imagePicker.pickMultiImage();
+      setState(() {
+      _images = images;
+    });
+    }
+    
+  }
 
-  //   setState(() {
-  //     latitude = geoposition.latitude.toString();
-  //     print(latitude);
-  //     longitude = geoposition.longitude.toString();
-  //   });
-  // }
+  Future<void> _getLocation()async{
+    var _serviceEnabled = await location.serviceEnabled();
+    if(!_serviceEnabled){
+      _serviceEnabled = await location.requestService();
+      if(!_serviceEnabled)
+      {
+        return;
+      }
+    }
+    var _permissionGranted = await location.hasPermission();
+    if(_permissionGranted == PermissionStatus.denied){
+      _permissionGranted = await location.requestPermission();
+      if(_permissionGranted != PermissionStatus.granted){
+        return;
+      }
+    }
+    _currentLocation = await location.getLocation();
+    setState(() {
+      currentLocation = _currentLocation!.latitude.toString() + " " + _currentLocation!.longitude.toString();
+      print(_currentLocation!.accuracy.toString());
+    });
+  }
   Future<Null> _selectDate(BuildContext context) async {
   DateTime? picked = await showDatePicker(
       context: context,
@@ -47,7 +93,7 @@ class _CivilianFormPageState extends State<CivilianFormPage> {
   if (picked != null)
     setState(() {
       selectedDate = picked;
-      _dateController.text = [selectedDate.day.toString(),'-',selectedDate.month,'-',selectedDate.year].toString();
+      _dateController.text = [selectedDate.day.toString(),'/',selectedDate.month,'/',selectedDate.year].toString();
     });
 }
 
@@ -56,22 +102,25 @@ Future<Null> _selectTime(BuildContext context) async {
       context: context,
       initialTime: selectedTime,
     );
-    if (picked != null)
+    if (picked != null) {
       setState(() {
         selectedTime = picked;
         _hour = selectedTime.hour.toString();
-        _minute = selectedTime.minute.toString();
-        //_time = _hour + ' : ' + _minute!;
-        //_timeController.text = _time!;
-        // _timeController.text = formatDate(
-        //     DateTime(2019, 08, 1, selectedTime.hour, selectedTime.minute),
-        //     [hh, ':', nn, " ", am]).toString();
+        if(selectedTime.minute.toString().length==1)
+        {
+          _minute='0'+selectedTime.minute.toString();
+          }
+        else
+        {
+          _minute=selectedTime.minute.toString();
+          }
       });
+    }
   }
-  String dropLevel = "Low";
-  String dropVolume = "Small: Less than 10 metric cube";
-  String dropTrigger = "Rainfall";
-  String dropEventStatus = "Active";
+  String? dropLevel;
+  String? dropVolume;
+  String? dropTrigger;
+  String? dropEventStatus;
   int p=0;
   @override
   Widget build(BuildContext context) {
@@ -97,10 +146,10 @@ Future<Null> _selectTime(BuildContext context) async {
                 const Text(
                   'Temporal and Spatial Data', style: TextStyle(fontSize: 25),
                 ),
-                Text('Location'),
+                const Text('Location'),
               GestureDetector(
                     onTap: (){
-                      // getCurrentLocation();
+                      _getLocation();
                     },
                     child: Container(
                       margin: const EdgeInsets.all(10),
@@ -112,10 +161,10 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text(latitude==""?"Current Location":[latitude, " ", longitude].join(),style: TextStyle(fontSize: 20),),),
+                      child: Center(child: Text(currentLocation,style: TextStyle(fontSize: 20),),),
                     ),
                   ),
-              Text("Date and Time"),
+              const Text("Date and Time"),
               Row(
                 children: <Widget>[
                   Expanded(child: GestureDetector(
@@ -132,7 +181,7 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text([selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), style: TextStyle(fontSize: 20),),),
+                      child: Center(child: Text([selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), style: const TextStyle(fontSize: 20),),),
                     ),
                   ),),
                   Expanded(child: GestureDetector(
@@ -149,38 +198,40 @@ Future<Null> _selectTime(BuildContext context) async {
                         ),
                         borderRadius: BorderRadius.circular(50),
                       ),
-                      child: Center(child: Text([selectedTime.hour.toString(),':',selectedTime.minute].join(), style: TextStyle(fontSize: 20),),)
+                      child: Center(child: Text([selectedTime.hour.toString(),':',selectedTime.minute.toString().length==1?'0'+selectedTime.minute.toString():selectedTime.minute.toString()].join(), style: const TextStyle(fontSize: 20),),)
                     )
                   ),)
                 ],
               ),
               //textForm('Date and Time'),
-              textForm('Depth'),
               const Text('Estimated Landslide Volume'),
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Small: Less than 10 metric cube",
-"Medium :10-1000 metric cube",
-"Large: 1000-100,000 metric cube",
-"Very large: 100,000-1,000,000 metric cube",
-"Catastrophic: Greater than 1,000,000 metric cube"
-].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropVolume = newValue!;
-                  });
-                },
-                value: dropVolume,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Estimated Landslide Volume"),
+                  items: ["Small: Less than 10 metric cube",
+                "Medium :10-1000 metric cube",
+                "Large: 1000-100,000 metric cube",
+                "Very large: 100,000-1,000,000 metric cube",
+                "Catastrophic: Greater than 1,000,000 metric cube"
+                ].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropVolume = newValue!;
+                    });
+                  },
+                  value: dropVolume,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -188,6 +239,11 @@ Future<Null> _selectTime(BuildContext context) async {
       ),
       borderRadius: BorderRadius.circular(50)),
               ),
+              // DropdownMenu(hint: "Volume", items: const ["Small: Less than 10 metric cube",
+              //   "Medium :10-1000 metric cube",
+              //   "Large: 1000-100,000 metric cube",
+              //   "Very large: 100,000-1,000,000 metric cube",
+              //   "Catastrophic: Greater than 1,000,000 metric cube"]),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children:<Widget>[ElevatedButton(onPressed: null,
@@ -250,22 +306,25 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Rainfall", "Seismic Activity", "Others"].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropTrigger = newValue!;
-                  });
-                },
-                value: dropTrigger,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Triggering Factor"),
+                  items: ["Rainfall", "Seismic Activity", "Others"].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropTrigger = newValue!;
+                    });
+                  },
+                  value: dropTrigger,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -280,22 +339,25 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Low", "Medium", "High"].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropLevel = newValue!;
-                  });
-                },
-                value: dropLevel,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child:DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Hazard Level"),
+                  items: ["Low", "Medium", "High"].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropLevel = newValue!;
+                    });
+                  },
+                  value: dropLevel,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -307,22 +369,25 @@ Future<Null> _selectTime(BuildContext context) async {
               Container(
                 margin: const EdgeInsets.all(10),
                 padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: DropdownButton<String>(
-                items: ["Active", "Reactivatable", "Naturally Stabilized", "Artificially Stabilized"].map<DropdownMenuItem<String>>((String value){
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue){
-                  setState(() {
-                    dropEventStatus = newValue!;
-                  });
-                },
-                value: dropEventStatus,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(20),
-              ),
+                child:DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    hint: const Text("Status of Event"),
+                  items: ["Active", "Reactivatable", "Naturally Stabilized", "Artificially Stabilized"].map<DropdownMenuItem<String>>((String value){
+                    return DropdownMenuItem<String>(
+                      value: value,
+                      child: Text(value),
+                    );
+                  }).toList(),
+                  onChanged: (String? newValue){
+                    setState(() {
+                      dropEventStatus = newValue!;
+                    });
+                  },
+                  value: dropEventStatus,
+                  isExpanded: true,
+                  borderRadius: BorderRadius.circular(20),
+                              ),
+                ),
               decoration: BoxDecoration(
                 border: Border.all(
                   color: Colors.black,
@@ -390,10 +455,30 @@ Future<Null> _selectTime(BuildContext context) async {
               margin: const EdgeInsets.all(10),
               child: SingleChildScrollView(child: Form(child: Column(children: <Widget>[
                 const Text(
-                  'Photos and Videos', style: TextStyle(fontSize: 25),
+                  'Photos', style: TextStyle(fontSize: 25),
                 ),
-              textForm('Take Photos and (or) Videos'),
-              textForm('Upload Photos and (or) Videos'),
+              Column(children: [
+                _image!=null?Image.file(_image!):const Text("No Image Selected"),
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                    ElevatedButton(onPressed: (){
+                  getImage(ImageSource.camera, isCamera: true);
+                              },
+                              style: ElevatedButton.styleFrom(primary: Colors.black), 
+                              child: const Icon(Icons.camera)),
+                              ElevatedButton(onPressed: (){
+                                getImage(ImageSource.gallery, isCamera: true);
+                                setState(() {
+                                  isMultiple = true;
+                                });
+                              }, 
+                              style: ElevatedButton.styleFrom(primary: Colors.black),
+                              child: const Icon(Icons.collections)),
+                  ],),
+                ),]),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children:<Widget>[ElevatedButton(onPressed: (){
@@ -406,7 +491,14 @@ Future<Null> _selectTime(BuildContext context) async {
               ),
               ),
               const SizedBox(width: 10,),
-              ElevatedButton(onPressed: (){},
+              ElevatedButton(onPressed: 
+                _pending?null:(){
+                  _httpPost(_currentLocation!.latitude.toString(), _currentLocation!.longitude.toString(), dropVolume, [selectedDate.day,'-',selectedDate.month,'-',selectedDate.year].join(), [selectedTime.hour.toString(),':',selectedTime.minute].join(), dropTrigger, dropLevel, dropEventStatus, File(_image!.path));
+                 Navigator.push(
+                            context,
+                            PageRouteBuilder(
+                                pageBuilder: (context, a, b) => const SecondLoading()));
+                },
               style: ElevatedButton.styleFrom(primary: Colors.black),
               child: const Text('Send', style: TextStyle(color: Colors.white),
               ),
@@ -452,4 +544,44 @@ Future<Null> _selectTime(BuildContext context) async {
     )]
     );
   }
+  Future<void> _httpPost(String latitude, String longitude, String? volume, String _date, String _time, String? triggerFactor, String? hazardLevel, String? statusOfEvent, File image) async {
+  setState(()=>_pending = true);
+  try{
+    var stream = http.ByteStream(DelegatingStream.typed(image.openRead()));
+    var length = await image.length();
+    var uri = Uri.parse("https://lehrish.herokuapp.com/civilians");
+    var request = http.MultipartRequest("POST", uri);
+    var multipartFile = http.MultipartFile('file', stream, length, filename: basename(image.path));
+    request.files.add(multipartFile);
+      request.fields['latitude']=latitude;
+      request.fields['longitude']=longitude;
+      request.fields['Date']=_date;
+      request.fields['Time']=_time;
+      request.fields['volume']=volume==null?"volume not selected":volume;
+      request.fields['triggering_factor']=triggerFactor==null?"triggerFactor not selected":triggerFactor;
+      request.fields['hazard_level'] = hazardLevel==null?"hazardLevel not selected":hazardLevel;
+      request.fields['status_of_event']=statusOfEvent==null?"statusOfEvent not selected":statusOfEvent;
+      var response = await request.send();
+    if(response.statusCode == 200){
+      setState(() {
+        // _responseBody = response.body;
+        print('Status OK');
+      });
+    }
+    else{
+      setState(() {
+        _error = 'Failed';
+        print('Status not OK');
+      });
+    }
+  }
+  catch(e){
+    setState(() {
+      _error = 'Failed';
+    });
+  }
+  setState(() {
+    _pending = false;
+  });
+}
 }

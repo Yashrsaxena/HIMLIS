@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'Pages/option.dart';
+import 'package:himlis/Pages/loading.dart';
+import 'package:himlis/Pages/option.dart';
 
 void main(){
 
@@ -12,11 +13,10 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.blue,
       ),
-      home: const OptionalPage(),
+      home: const Loading(),
     );
   }
 }
